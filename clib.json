@@ -1,0 +1,14 @@
+{
+  "name": "http_context",
+  "version": "0.1.0",
+  "repo": "c-sdk/http_context",
+  "description": "Types to create HTTP request context.",
+  "license": "unlicense",
+  "keywords": ["http", "types", "request", "response"],
+  "src": ["./http_context.h", "./http_context.c"],
+  "dependencies": {
+    "c-sdk/pagesize": "*",
+    "c-sdk/arena": "*",
+    "c-sdk/string_map": "*"
+  }
+}
