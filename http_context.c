@@ -129,7 +129,7 @@ void http_send(int client_socket, struct http_response_t *response) {
     point += snprintf(response_content.memory + point, page_size(), "\r\n");
   }
 
-  http_log("response:\n%s\n", response_content.memory);
+  http_context_log("response:\n%s\n", response_content.memory);
 
   (void)write(client_socket, response_content.memory, point);
 
@@ -141,7 +141,7 @@ int http_read_request(int client_socket, char* buffer, size_t buffer_size) {
   size_t space_remaining = buffer_size;
   size_t buffer_read = 0;
   while ((request_read = read(client_socket, buffer + buffer_read, 1024)) > 0) {
-    http_log("read socket status: %ld, %ld, %ld\n", request_read, buffer_read, space_remaining);
+    http_context_log("read socket status: %ld, %ld, %ld\n", request_read, buffer_read, space_remaining);
     space_remaining -= request_read;
     buffer_read += request_read;
     if (space_remaining < 0) {
@@ -153,7 +153,7 @@ int http_read_request(int client_socket, char* buffer, size_t buffer_size) {
   }
   buffer[buffer_read++] = 0;
 
-  http_log("incoming request:\n%s\n", buffer);
+  http_context_log("incoming request:\n%s\n", buffer);
 
   return (buffer_read >= 0) - 1;
 }
