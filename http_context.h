@@ -18,14 +18,7 @@ struct http_request_t {
   struct string_map_t headers;
 };
 
-#define GET "GET"
-#define POST "POST"
-#define PUT "PUT"
-#define PATCH "PATCH"
-#define DELETE "DELETE"
-#define OPTIONS "OPTIONS"
-
- struct http_response_t {
+struct http_response_t {
   size_t status;
   char* content;
   struct string_map_t headers;
