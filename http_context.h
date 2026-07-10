@@ -24,8 +24,8 @@ struct http_response_t {
   struct string_map_t headers;
 };
 
-void http_parse_request(arena_t *arena, struct http_request_t *request,
-                        const char *request_text);
+int http_parse_request(arena_t *arena, struct http_request_t *request,
+                       const char *request_text);
 int http_read_request(int client_socket, char* buffer, size_t buffer_size);
 
 void http_request_init(struct arena_t *arena, struct http_request_t *request);

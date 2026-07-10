@@ -1,5 +1,8 @@
+-Wall
+-Werror
 -std=c17
 -I.
 -I./deps/pagesize
 -I./deps/arena
 -I./deps/string_map
+-I./deps/http_types

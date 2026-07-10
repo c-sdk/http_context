@@ -9,6 +9,7 @@
   "dependencies": {
     "c-sdk/pagesize": "*",
     "c-sdk/arena": "*",
-    "c-sdk/string_map": "*"
+    "c-sdk/string_map": "*",
+    "c-sdk/http_types": "0.6.1"
   }
 }

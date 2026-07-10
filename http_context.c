@@ -4,6 +4,9 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "http_headers.h"
+#include "http_methods.h"
+#include "http_statuses.h"
 #include "http_context.h"
 #include "pagesize.h"
 #include "arena.h"
@@ -12,6 +15,13 @@
 #define HTTP_HEADERS_DEFAULT_SIZE 24
 #define HTTP_COOKIES_DEFAULT_SIZE 24
 #define HTTP_DATA_DEFAULT_SIZE 24
+
+static const char* http_trim_line_end(const char* start, const char* end) {
+  if (end > start && end[-1] == '\r') {
+    return end - 1;
+  }
+  return end;
+}
 
 void http_request_init(struct arena_t* arena,
                        struct http_request_t* request) {
@@ -28,33 +38,82 @@ void http_response_init(struct arena_t* arena, struct http_response_t* response)
   (void)string_map_init_with_arena(arena, &response->headers, HTTP_HEADERS_DEFAULT_SIZE);
 }
 
-void http_parse_request(arena_t* arena,
-                        struct http_request_t* request,
-                        const char *request_text) {
-  const char* header_end = strchr((char*)request_text, '\n') - 1;
-  char* position = (char*)request_text;
-
-  const char* method_end = strchr(position, ' ');
-  request->method = arena_string_with_null(arena, position, (method_end - position + 1));
-  position = (char*)method_end + 1;
-
-  const char* path_end = strchr(position, ' ');
-  request->path = arena_string_with_null(arena, position, (path_end - position + 1));
-  position = (char*)path_end + 1;
-
-  request->version = arena_string_with_null(arena, position, (header_end - position  + 1));
-  position = (char*)header_end + 2;
-
-  while ((header_end = strchr((char*)position, '\n') - 1)) {
-    if (header_end == position) { break; }
-    const char* separator = strchr(position, ':');
-    const char* key = arena_string_with_null(arena, position, (separator - position + 1));
-    const char* value = arena_string_with_null(arena, separator + 2, (header_end - 2 - separator + 1));
-    string_map_add(&request->headers, key, (void*)value);
-    position = (char*)header_end + 2;
+int http_parse_request(arena_t* arena,
+                       struct http_request_t* request,
+                       const char *request_text) {
+  if (arena == NULL || request == NULL || request_text == NULL) {
+    return -1;
   }
 
-  position = (char*)header_end + 2;
+  const char* line_end = strchr(request_text, '\n');
+  if (line_end == NULL) {
+    return -1;
+  }
+
+  const char* line_stop = http_trim_line_end(request_text, line_end);
+  const char* position = request_text;
+
+  const char* method_end = memchr(position, ' ', (size_t)(line_stop - position));
+  if (method_end == NULL || method_end == position) {
+    return -1;
+  }
+  request->method = arena_string_with_null(arena, position,
+                                           (method_end - position + 1));
+
+  position = method_end + 1;
+  const char* path_end = memchr(position, ' ', (size_t)(line_stop - position));
+  if (path_end == NULL || path_end == position) {
+    return -1;
+  }
+  request->path = arena_string_with_null(arena, position,
+                                         (path_end - position + 1));
+
+  position = path_end + 1;
+  if (position >= line_stop) {
+    return -1;
+  }
+  request->version = arena_string_with_null(arena, position,
+                                            (line_stop - position + 1));
+
+  position = line_end + 1;
+
+  while (position[0] != '\0') {
+    line_end = strchr(position, '\n');
+    if (line_end == NULL) {
+      return -1;
+    }
+
+    line_stop = http_trim_line_end(position, line_end);
+    if (line_stop == position) {
+      position = line_end + 1;
+      break;
+    }
+
+    const char* separator = memchr(position, ':', (size_t)(line_stop - position));
+    if (separator == NULL || separator == position) {
+      return -1;
+    }
+
+    const char* key = arena_string_with_null(arena, position,
+                                             (separator - position + 1));
+
+    const char* value_position = separator + 1;
+    while (value_position < line_stop &&
+           (*value_position == ' ' || *value_position == '\t')) {
+      value_position++;
+    }
+
+    const char* value_end = line_stop;
+    while (value_end > value_position &&
+           (value_end[-1] == ' ' || value_end[-1] == '\t')) {
+      value_end--;
+    }
+
+    const char* value = arena_string_with_null(arena, value_position,
+                                               (value_end - value_position + 1));
+    string_map_add(&request->headers, key, (void*)value);
+    position = line_end + 1;
+  }
 
   struct string_map_entry_t *contentLenghtHeader = NULL;
   const char* const kContentLengthHttpHeaderKey = "Content-Length";
@@ -63,17 +122,23 @@ void http_parse_request(arena_t* arena,
                                kContentLengthHttpHeaderKey);
 
   if (contentLenghtHeader) {
-    int contentLength = atoi(contentLenghtHeader->value);
+    char* endptr = NULL;
+    long contentLength = strtol(contentLenghtHeader->value, &endptr, 10);
+    if (endptr == contentLenghtHeader->value || contentLength < 0) {
+      return -1;
+    }
     request->content = arena_string_with_null(arena, position,
                                               (contentLength + 1));
   }
+
+  return 0;
 }
 
 int http_request_is_get(const struct http_request_t *request) {
-  return memcmp(request->method, "GET", 3) == 0;
+  return request != NULL && request->method != NULL && strcmp(request->method, GET) == 0;
 }
 int http_request_is_post(const struct http_request_t *request) {
-  return memcmp(request->method, "POST", 4) == 0;
+  return request != NULL && request->method != NULL && strcmp(request->method, POST) == 0;
 }
 
 #define HTTP_RESPONSE_NAMES_SIZE 7
@@ -82,13 +147,13 @@ struct http_response_names_t {
   int has_content;
   const char* const name;
 } http_names[HTTP_RESPONSE_NAMES_SIZE] = {
-  { 200, 1, "OK" },
-  { 303, 0, "See Other" },
-  { 400, 0, "Bad Request" },
-  { 401, 0, "Unauthorized" },
-  { 403, 0, "Forbidden" },
-  { 404, 0, "Not Found" },
-  { 500, 0, "Internal Server Error" }
+  { HTTP_STATUS_200, 1, HTTP_STATUS_OK },
+  { HTTP_STATUS_303, 0, HTTP_STATUS_SEE_OTHER },
+  { HTTP_STATUS_400, 0, HTTP_STATUS_BAD_REQUEST },
+  { HTTP_STATUS_401, 0, HTTP_STATUS_UNAUTHORIZED },
+  { HTTP_STATUS_403, 0, HTTP_STATUS_FORBIDDEN },
+  { HTTP_STATUS_404, 0, HTTP_STATUS_NOT_FOUND },
+  { HTTP_STATUS_500, 0, HTTP_STATUS_INTERNAL_SERVER_ERROR }
 };
 
 static const struct http_response_names_t* http_response_find_name_by_status(int number) {
@@ -121,7 +186,7 @@ void http_send(int client_socket, struct http_response_t *response) {
                       h->key, (char*)h->value);
   }
 
-  if (r->has_content) {
+  if (response->content != NULL) {
     point += snprintf(response_content.memory + point, page_size(),
                       "\r\n%s",
                       response->content);
@@ -161,7 +226,7 @@ int http_read_request(int client_socket, char* buffer, size_t buffer_size) {
 void http_ok_response(arena_t* arena,
                       struct http_response_t *response,
                       const char* const content) {
-  response->status = 200;
+  response->status = HTTP_STATUS_200;
   response->content = (char*)content;
 
   char* content_length_value = arena_string_from_int(arena, strlen(content));
@@ -173,7 +238,7 @@ void http_see_other(arena_t* arena,
                     struct http_response_t *response,
                     const char* const location) {
   (void)arena;
-  response->status = 303;
+  response->status = HTTP_STATUS_303;
   string_map_add(&response->headers, "Content-Length", "0");
   string_map_add(&response->headers, "Location", (char*)location);
 }
