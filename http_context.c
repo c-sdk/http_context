@@ -58,7 +58,7 @@ int http_parse_request(arena_t* arena,
     return -1;
   }
   request->method = arena_string_with_null(arena, position,
-                                           (method_end - position + 1));
+                                           (size_t)(method_end - position));
 
   position = method_end + 1;
   const char* path_end = memchr(position, ' ', (size_t)(line_stop - position));
@@ -66,14 +66,14 @@ int http_parse_request(arena_t* arena,
     return -1;
   }
   request->path = arena_string_with_null(arena, position,
-                                         (path_end - position + 1));
+                                         (size_t)(path_end - position));
 
   position = path_end + 1;
   if (position >= line_stop) {
     return -1;
   }
   request->version = arena_string_with_null(arena, position,
-                                            (line_stop - position + 1));
+                                            (size_t)(line_stop - position));
 
   position = line_end + 1;
 
@@ -95,7 +95,7 @@ int http_parse_request(arena_t* arena,
     }
 
     const char* key = arena_string_with_null(arena, position,
-                                             (separator - position + 1));
+                                             (size_t)(separator - position));
 
     const char* value_position = separator + 1;
     while (value_position < line_stop &&
@@ -110,7 +110,7 @@ int http_parse_request(arena_t* arena,
     }
 
     const char* value = arena_string_with_null(arena, value_position,
-                                               (value_end - value_position + 1));
+                                               (size_t)(value_end - value_position));
     string_map_add(&request->headers, key, (void*)value);
     position = line_end + 1;
   }
@@ -128,17 +128,17 @@ int http_parse_request(arena_t* arena,
       return -1;
     }
     request->content = arena_string_with_null(arena, position,
-                                              (contentLength + 1));
+                                              (size_t)contentLength);
   }
 
   return 0;
 }
 
 int http_request_is_get(const struct http_request_t *request) {
-  return request != NULL && request->method != NULL && strcmp(request->method, GET) == 0;
+  return request != NULL && request->method != NULL && strcmp(request->method, HTTP_METHODS_GET) == 0;
 }
 int http_request_is_post(const struct http_request_t *request) {
-  return request != NULL && request->method != NULL && strcmp(request->method, POST) == 0;
+  return request != NULL && request->method != NULL && strcmp(request->method, HTTP_METHODS_POST) == 0;
 }
 
 #define HTTP_RESPONSE_NAMES_SIZE 7
