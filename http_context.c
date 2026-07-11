@@ -13,8 +13,19 @@
 
 
 #define HTTP_HEADERS_DEFAULT_SIZE 24
-#define HTTP_COOKIES_DEFAULT_SIZE 24
-#define HTTP_DATA_DEFAULT_SIZE 24
+
+static int http_string_map_set(struct string_map_t* map,
+                               const char* key,
+                               void* value) {
+  for (size_t i = 0; i < map->count; ++i) {
+    struct string_map_entry_t* entry = &map->data[i];
+    if (strcmp(entry->key, key) == 0) {
+      entry->value = value;
+      return 0;
+    }
+  }
+  return string_map_add(map, key, value);
+}
 
 static const char* http_trim_line_end(const char* start, const char* end) {
   if (end > start && end[-1] == '\r') {
@@ -36,6 +47,35 @@ void http_request_init(struct arena_t* arena,
 void http_response_init(struct arena_t* arena, struct http_response_t* response) {
   response->content = NULL;
   (void)string_map_init_with_arena(arena, &response->headers, HTTP_HEADERS_DEFAULT_SIZE);
+}
+
+void http_response_set_status(struct http_response_t* response, size_t status) {
+  response->status = status;
+}
+
+void http_response_set_header(struct http_response_t* response,
+                              const char* key,
+                              const char* value) {
+  (void)http_string_map_set(&response->headers, key, (void*)value);
+}
+
+void http_response_set_text(struct http_response_t* response,
+                            const char* content) {
+  http_response_set_status(response, HTTP_STATUS_200);
+  response->content = (char*)content;
+
+  static char content_length_value[32];
+  snprintf(content_length_value, sizeof(content_length_value), "%zu", strlen(content));
+  (void)http_string_map_set(&response->headers, "Content-Length", content_length_value);
+  (void)http_string_map_set(&response->headers, "Content-Type", "text/plain; charset=utf-8");
+}
+
+void http_response_set_redirect(struct http_response_t* response,
+                                const char* location) {
+  http_response_set_status(response, HTTP_STATUS_303);
+  response->content = NULL;
+  (void)http_string_map_set(&response->headers, "Content-Length", "0");
+  (void)http_string_map_set(&response->headers, "Location", (char*)location);
 }
 
 int http_parse_request(arena_t* arena,
@@ -144,16 +184,15 @@ int http_request_is_post(const struct http_request_t *request) {
 #define HTTP_RESPONSE_NAMES_SIZE 7
 struct http_response_names_t {
   int number;
-  int has_content;
   const char* const name;
 } http_names[HTTP_RESPONSE_NAMES_SIZE] = {
-  { HTTP_STATUS_200, 1, HTTP_STATUS_OK },
-  { HTTP_STATUS_303, 0, HTTP_STATUS_SEE_OTHER },
-  { HTTP_STATUS_400, 0, HTTP_STATUS_BAD_REQUEST },
-  { HTTP_STATUS_401, 0, HTTP_STATUS_UNAUTHORIZED },
-  { HTTP_STATUS_403, 0, HTTP_STATUS_FORBIDDEN },
-  { HTTP_STATUS_404, 0, HTTP_STATUS_NOT_FOUND },
-  { HTTP_STATUS_500, 0, HTTP_STATUS_INTERNAL_SERVER_ERROR }
+  { HTTP_STATUS_200, HTTP_STATUS_OK },
+  { HTTP_STATUS_303, HTTP_STATUS_SEE_OTHER },
+  { HTTP_STATUS_400, HTTP_STATUS_BAD_REQUEST },
+  { HTTP_STATUS_401, HTTP_STATUS_UNAUTHORIZED },
+  { HTTP_STATUS_403, HTTP_STATUS_FORBIDDEN },
+  { HTTP_STATUS_404, HTTP_STATUS_NOT_FOUND },
+  { HTTP_STATUS_500, HTTP_STATUS_INTERNAL_SERVER_ERROR }
 };
 
 static const struct http_response_names_t* http_response_find_name_by_status(int number) {
@@ -171,13 +210,21 @@ void http_send(int client_socket, struct http_response_t *response) {
   int res = arena_create(&response_content, page_size());
   assert(res == 0);
 
-  const struct http_response_names_t* r =
+  if (response->status == 0) {
+    response->status = HTTP_STATUS_200;
+  }
+
+  const struct http_response_names_t* response_name =
     http_response_find_name_by_status(response->status);
+  if (response_name == NULL) {
+    response->status = HTTP_STATUS_500;
+  }
+  response_name = http_response_find_name_by_status(response->status);
 
   int point = 0;
   point += snprintf(response_content.memory + point, page_size(),
            "HTTP/1.1 %d %s\r\n",
-           r->number, r->name);
+           response_name->number, response_name->name);
 
   for (size_t i = 0; i < response->headers.count; ++i) {
     struct string_map_entry_t* h = &response->headers.data[i];
@@ -187,6 +234,13 @@ void http_send(int client_socket, struct http_response_t *response) {
   }
 
   if (response->content != NULL) {
+    struct string_map_entry_t* content_length = NULL;
+    (void)string_map_find_by_key(&response->headers, &content_length, "Content-Length");
+    if (content_length == NULL) {
+      point += snprintf(response_content.memory + point, page_size(),
+                        "Content-Length: %zu\r\n",
+                        strlen(response->content));
+    }
     point += snprintf(response_content.memory + point, page_size(),
                       "\r\n%s",
                       response->content);
@@ -221,24 +275,4 @@ int http_read_request(int client_socket, char* buffer, size_t buffer_size) {
   http_context_log("incoming request:\n%s\n", buffer);
 
   return (buffer_read >= 0) - 1;
-}
-
-void http_ok_response(arena_t* arena,
-                      struct http_response_t *response,
-                      const char* const content) {
-  response->status = HTTP_STATUS_200;
-  response->content = (char*)content;
-
-  char* content_length_value = arena_string_from_int(arena, strlen(content));
-  string_map_add(&response->headers, "Content-Length", content_length_value);
-  string_map_add(&response->headers, "Content-Type", "text/html");
-}
-
-void http_see_other(arena_t* arena,
-                    struct http_response_t *response,
-                    const char* const location) {
-  (void)arena;
-  response->status = HTTP_STATUS_303;
-  string_map_add(&response->headers, "Content-Length", "0");
-  string_map_add(&response->headers, "Location", (char*)location);
 }

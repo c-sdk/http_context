@@ -35,11 +35,13 @@ int http_request_is_post(const struct http_request_t *request);
 void http_response_init(struct arena_t* arena, struct http_response_t* response);
 void http_send(int client_socket, struct http_response_t *response);
 
-void http_ok_response(arena_t *arena, struct http_response_t *response,
-                      const char *const content);
-
-void http_see_other(arena_t* arena,
-                    struct http_response_t *response,
-                    const char* const content);
+void http_response_set_status(struct http_response_t* response, size_t status);
+void http_response_set_header(struct http_response_t* response,
+                              const char* key,
+                              const char* value);
+void http_response_set_text(struct http_response_t* response,
+                            const char* content);
+void http_response_set_redirect(struct http_response_t* response,
+                                const char* location);
 
 #endif

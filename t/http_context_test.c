@@ -3,10 +3,17 @@
 
 #include "http_context.h"
 #include "http_methods.h"
+#include "http_statuses.h"
 
 static const char* get_header(const struct http_request_t* request, const char* key) {
   struct string_map_entry_t* entry = NULL;
   (void)string_map_find_by_key((struct string_map_t*)&request->headers, &entry, key);
+  return entry == NULL ? NULL : (const char*)entry->value;
+}
+
+static const char* get_response_header(const struct http_response_t* response, const char* key) {
+  struct string_map_entry_t* entry = NULL;
+  (void)string_map_find_by_key((struct string_map_t*)&response->headers, &entry, key);
   return entry == NULL ? NULL : (const char*)entry->value;
 }
 
@@ -104,11 +111,52 @@ static void test_request_method_helpers_use_exact_matches(void) {
   assert(!http_request_is_get(&request));
 }
 
+static void test_response_helpers_set_status_headers_and_body(void) {
+  arena_t arena = {0};
+  assert(arena_create(&arena, 4096) == 0);
+
+  struct http_response_t response;
+  http_response_init(&arena, &response);
+
+  http_response_set_status(&response, HTTP_STATUS_404);
+  assert(response.status == HTTP_STATUS_404);
+
+  http_response_set_header(&response, "X-Test", "one");
+  http_response_set_header(&response, "X-Test", "two");
+  assert(strcmp(get_response_header(&response, "X-Test"), "two") == 0);
+
+  http_response_set_text(&response, "hello");
+  assert(response.status == HTTP_STATUS_200);
+  assert(strcmp(response.content, "hello") == 0);
+  assert(strcmp(get_response_header(&response, "Content-Length"), "5") == 0);
+  assert(strcmp(get_response_header(&response, "Content-Type"), "text/plain; charset=utf-8") == 0);
+
+  arena_free(&arena);
+}
+
+static void test_response_redirect_sets_location_and_empty_body(void) {
+  arena_t arena = {0};
+  assert(arena_create(&arena, 4096) == 0);
+
+  struct http_response_t response;
+  http_response_init(&arena, &response);
+
+  http_response_set_redirect(&response, "/next");
+  assert(response.status == HTTP_STATUS_303);
+  assert(response.content == NULL);
+  assert(strcmp(get_response_header(&response, "Location"), "/next") == 0);
+  assert(strcmp(get_response_header(&response, "Content-Length"), "0") == 0);
+
+  arena_free(&arena);
+}
+
 int main(void) {
   test_parse_request_with_body_and_trimmed_headers();
   test_parse_request_rejects_missing_request_delimiters();
   test_parse_request_rejects_headers_without_colons();
   test_parse_request_rejects_invalid_content_length();
   test_request_method_helpers_use_exact_matches();
+  test_response_helpers_set_status_headers_and_body();
+  test_response_redirect_sets_location_and_empty_body();
   return 0;
 }
