@@ -1,6 +1,6 @@
 {
   "name": "http_context",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "repo": "c-sdk/http_context",
   "description": "Types to create HTTP request context.",
   "license": "unlicense",
