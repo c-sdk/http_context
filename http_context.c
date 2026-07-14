@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <ctype.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -28,10 +29,21 @@ static int http_string_map_set(struct string_map_t* map,
 }
 
 static const char* http_trim_line_end(const char* start, const char* end) {
+  assert(start);
+  assert(end);
+
   if (end > start && end[-1] == '\r') {
     return end - 1;
   }
   return end;
+}
+
+static void http_lowercase_in_place(char* text) {
+  assert(text);
+
+  for (; *text != '\0'; ++text) {
+    *text = (char)tolower((unsigned char)*text);
+  }
 }
 
 void http_request_init(struct arena_t* arena,
@@ -81,9 +93,9 @@ void http_response_set_redirect(struct http_response_t* response,
 int http_parse_request(arena_t* arena,
                        struct http_request_t* request,
                        const char *request_text) {
-  if (arena == NULL || request == NULL || request_text == NULL) {
-    return -1;
-  }
+  assert(arena);
+  assert(request);
+  assert(request_text);
 
   const char* line_end = strchr(request_text, '\n');
   if (line_end == NULL) {
@@ -136,6 +148,7 @@ int http_parse_request(arena_t* arena,
 
     const char* key = arena_string_with_null(arena, position,
                                              (size_t)(separator - position));
+    http_lowercase_in_place((char*)key);
 
     const char* value_position = separator + 1;
     while (value_position < line_stop &&
@@ -156,7 +169,7 @@ int http_parse_request(arena_t* arena,
   }
 
   struct string_map_entry_t *contentLenghtHeader = NULL;
-  const char* const kContentLengthHttpHeaderKey = "Content-Length";
+  const char* const kContentLengthHttpHeaderKey = "content-length";
   (void)string_map_find_by_key(&request->headers,
                                &contentLenghtHeader,
                                kContentLengthHttpHeaderKey);
@@ -175,10 +188,12 @@ int http_parse_request(arena_t* arena,
 }
 
 int http_request_is_get(const struct http_request_t *request) {
-  return request != NULL && request->method != NULL && strcmp(request->method, HTTP_METHODS_GET) == 0;
+  assert(request && request->method);
+  return strcmp(request->method, HTTP_METHODS_GET) == 0;
 }
 int http_request_is_post(const struct http_request_t *request) {
-  return request != NULL && request->method != NULL && strcmp(request->method, HTTP_METHODS_POST) == 0;
+  assert(request && request->method);
+  return strcmp(request->method, HTTP_METHODS_POST) == 0;
 }
 
 #define HTTP_RESPONSE_NAMES_SIZE 7

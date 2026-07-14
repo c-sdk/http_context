@@ -37,9 +37,9 @@ static void test_parse_request_with_body_and_trimmed_headers(void) {
   assert(strcmp(request.path, "/submit") == 0);
   assert(strcmp(request.version, "HTTP/1.1") == 0);
   assert(strcmp(request.content, "hello") == 0);
-  assert(strcmp(get_header(&request, "Host"), "example.com") == 0);
-  assert(strcmp(get_header(&request, "Content-Length"), "5") == 0);
-  assert(strcmp(get_header(&request, "X-Trimmed"), "spaced value") == 0);
+  assert(strcmp(get_header(&request, "host"), "example.com") == 0);
+  assert(strcmp(get_header(&request, "content-length"), "5") == 0);
+  assert(strcmp(get_header(&request, "x-trimmed"), "spaced value") == 0);
 
   arena_free(&arena);
 }
@@ -57,6 +57,26 @@ static void test_parse_request_rejects_missing_request_delimiters(void) {
     "\r\n";
 
   assert(http_parse_request(&arena, &request, request_text) == -1);
+
+  arena_free(&arena);
+}
+
+static void test_parse_request_lowercases_header_keys(void) {
+  arena_t arena = {0};
+  assert(arena_create(&arena, 4096) == 0);
+
+  struct http_request_t request;
+  http_request_init(&arena, &request);
+
+  const char* request_text =
+    "GET / HTTP/1.1\r\n"
+    "HoSt: Example.com\r\n"
+    "X-CuStOm-HeAdEr: value\r\n"
+    "\r\n";
+
+  assert(http_parse_request(&arena, &request, request_text) == 0);
+  assert(strcmp(get_header(&request, "host"), "Example.com") == 0);
+  assert(strcmp(get_header(&request, "x-custom-header"), "value") == 0);
 
   arena_free(&arena);
 }
@@ -155,6 +175,7 @@ int main(void) {
   test_parse_request_rejects_missing_request_delimiters();
   test_parse_request_rejects_headers_without_colons();
   test_parse_request_rejects_invalid_content_length();
+  test_parse_request_lowercases_header_keys();
   test_request_method_helpers_use_exact_matches();
   test_response_helpers_set_status_headers_and_body();
   test_response_redirect_sets_location_and_empty_body();
