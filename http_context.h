@@ -24,6 +24,26 @@ struct http_response_t {
   struct string_map_t headers;
 };
 
+/*
+ * Header names are compared case-insensitively, as required by HTTP.
+ * Keys and values passed to http_headers_put are borrowed and must remain
+ * valid for as long as the map is used.
+ *
+ * http_headers_find and http_headers_get return NULL when the header is absent.
+ * http_headers_put returns -1 when a new header cannot fit in the map.
+ * http_headers_delete removes all matching entries and returns their count.
+ */
+struct string_map_entry_t* http_headers_find(struct string_map_t* headers,
+                                             const char* name);
+const char* http_headers_get(const struct string_map_t* headers,
+                             const char* name);
+int http_headers_contains(const struct string_map_t* headers,
+                          const char* name);
+int http_headers_put(struct string_map_t* headers,
+                     const char* name,
+                     const char* value);
+size_t http_headers_delete(struct string_map_t* headers, const char* name);
+
 int http_parse_request(arena_t *arena, struct http_request_t *request,
                        const char *request_text);
 int http_read_request(int client_socket, char* buffer, size_t buffer_size);

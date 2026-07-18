@@ -5,7 +5,6 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "http_headers.h"
 #include "http_methods.h"
 #include "http_statuses.h"
 #include "http_context.h"
@@ -15,17 +14,110 @@
 
 #define HTTP_HEADERS_DEFAULT_SIZE 24
 
-static int http_string_map_set(struct string_map_t* map,
-                               const char* key,
-                               void* value) {
-  for (size_t i = 0; i < map->count; ++i) {
-    struct string_map_entry_t* entry = &map->data[i];
-    if (strcmp(entry->key, key) == 0) {
-      entry->value = value;
+static int http_header_name_equals(const char* left, const char* right) {
+  assert(left);
+  assert(right);
+
+  while (*left != '\0' && *right != '\0') {
+    unsigned char left_char = (unsigned char)*left;
+    unsigned char right_char = (unsigned char)*right;
+    if (tolower(left_char) != tolower(right_char)) {
       return 0;
     }
+    left++;
+    right++;
   }
-  return string_map_add(map, key, value);
+  return *left == *right;
+}
+
+struct string_map_entry_t* http_headers_find(struct string_map_t* headers,
+                                             const char* name) {
+  assert(headers);
+  assert(name);
+
+  for (size_t i = 0; i < headers->count; ++i) {
+    if (http_header_name_equals(headers->data[i].key, name)) {
+      return &headers->data[i];
+    }
+  }
+  return NULL;
+}
+
+const char* http_headers_get(const struct string_map_t* headers,
+                             const char* name) {
+  assert(headers);
+  assert(name);
+
+  for (size_t i = 0; i < headers->count; ++i) {
+    if (http_header_name_equals(headers->data[i].key, name)) {
+      return (const char*)headers->data[i].value;
+    }
+  }
+  return NULL;
+}
+
+int http_headers_contains(const struct string_map_t* headers,
+                          const char* name) {
+  return http_headers_get(headers, name) != NULL;
+}
+
+size_t http_headers_delete(struct string_map_t* headers, const char* name) {
+  assert(headers);
+  assert(name);
+
+  size_t write_index = 0;
+  size_t deleted = 0;
+  for (size_t read_index = 0; read_index < headers->count; ++read_index) {
+    struct string_map_entry_t entry = headers->data[read_index];
+    if (http_header_name_equals(entry.key, name)) {
+      deleted++;
+      continue;
+    }
+    headers->data[write_index++] = entry;
+  }
+
+  for (size_t i = write_index; i < headers->count; ++i) {
+    headers->data[i].key = NULL;
+    headers->data[i].value = NULL;
+  }
+  headers->count = write_index;
+  return deleted;
+}
+
+int http_headers_put(struct string_map_t* headers,
+                     const char* name,
+                     const char* value) {
+  assert(headers);
+  assert(name);
+  assert(value);
+
+  struct string_map_entry_t* existing = http_headers_find(headers, name);
+  if (existing == NULL) {
+    if (headers->count >= headers->capacity) {
+      return -1;
+    }
+    return string_map_add(headers, name, (void*)value);
+  }
+
+  existing->value = (void*)value;
+
+  /* A put represents one logical header, so discard later duplicates. */
+  size_t existing_index = (size_t)(existing - headers->data);
+  size_t write_index = existing_index + 1;
+  for (size_t read_index = existing_index + 1;
+       read_index < headers->count;
+       ++read_index) {
+    struct string_map_entry_t entry = headers->data[read_index];
+    if (!http_header_name_equals(entry.key, name)) {
+      headers->data[write_index++] = entry;
+    }
+  }
+  for (size_t i = write_index; i < headers->count; ++i) {
+    headers->data[i].key = NULL;
+    headers->data[i].value = NULL;
+  }
+  headers->count = write_index;
+  return 0;
 }
 
 static const char* http_trim_line_end(const char* start, const char* end) {
@@ -57,6 +149,7 @@ void http_request_init(struct arena_t* arena,
 }
 
 void http_response_init(struct arena_t* arena, struct http_response_t* response) {
+  response->status = 0;
   response->content = NULL;
   (void)string_map_init_with_arena(arena, &response->headers, HTTP_HEADERS_DEFAULT_SIZE);
 }
@@ -68,7 +161,7 @@ void http_response_set_status(struct http_response_t* response, size_t status) {
 void http_response_set_header(struct http_response_t* response,
                               const char* key,
                               const char* value) {
-  (void)http_string_map_set(&response->headers, key, (void*)value);
+  (void)http_headers_put(&response->headers, key, value);
 }
 
 void http_response_set_text(struct http_response_t* response,
@@ -78,16 +171,16 @@ void http_response_set_text(struct http_response_t* response,
 
   static char content_length_value[32];
   snprintf(content_length_value, sizeof(content_length_value), "%zu", strlen(content));
-  (void)http_string_map_set(&response->headers, "Content-Length", content_length_value);
-  (void)http_string_map_set(&response->headers, "Content-Type", "text/plain; charset=utf-8");
+  (void)http_headers_put(&response->headers, "Content-Length", content_length_value);
+  (void)http_headers_put(&response->headers, "Content-Type", "text/plain; charset=utf-8");
 }
 
 void http_response_set_redirect(struct http_response_t* response,
                                 const char* location) {
   http_response_set_status(response, HTTP_STATUS_303);
   response->content = NULL;
-  (void)http_string_map_set(&response->headers, "Content-Length", "0");
-  (void)http_string_map_set(&response->headers, "Location", (char*)location);
+  (void)http_headers_put(&response->headers, "Content-Length", "0");
+  (void)http_headers_put(&response->headers, "Location", location);
 }
 
 int http_parse_request(arena_t* arena,
@@ -168,16 +261,14 @@ int http_parse_request(arena_t* arena,
     position = line_end + 1;
   }
 
-  struct string_map_entry_t *contentLenghtHeader = NULL;
   const char* const kContentLengthHttpHeaderKey = "content-length";
-  (void)string_map_find_by_key(&request->headers,
-                               &contentLenghtHeader,
-                               kContentLengthHttpHeaderKey);
+  const char* content_length_header =
+    http_headers_get(&request->headers, kContentLengthHttpHeaderKey);
 
-  if (contentLenghtHeader) {
+  if (content_length_header) {
     char* endptr = NULL;
-    long contentLength = strtol(contentLenghtHeader->value, &endptr, 10);
-    if (endptr == contentLenghtHeader->value || contentLength < 0) {
+    long contentLength = strtol(content_length_header, &endptr, 10);
+    if (endptr == content_length_header || contentLength < 0) {
       return -1;
     }
     request->content = arena_string_with_null(arena, position,
@@ -249,9 +340,7 @@ void http_send(int client_socket, struct http_response_t *response) {
   }
 
   if (response->content != NULL) {
-    struct string_map_entry_t* content_length = NULL;
-    (void)string_map_find_by_key(&response->headers, &content_length, "Content-Length");
-    if (content_length == NULL) {
+    if (!http_headers_contains(&response->headers, "Content-Length")) {
       point += snprintf(response_content.memory + point, page_size(),
                         "Content-Length: %zu\r\n",
                         strlen(response->content));
